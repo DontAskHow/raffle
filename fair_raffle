@@ -1,160 +1,381 @@
 from typing import Set, List
+
 from web3 import Web3
+
 from decimal import Decimal
+
 import random
+
 import bisect
+
 import time
 
+
+
 # Configuration
+
 RPC_URL = "https://mainnet.base.org"
+
 CHAIN_ID = 8453
-BLOCKS_TO_SCAN = 100000  # Look back 100k blocks
+
+BLOCKS_TO_SCAN = 100000  # Look back 100k blocks
+
 CHUNK_SIZE = 2000
-RETRY_DELAY = 1  # seconds
+
+RETRY_DELAY = 1  # seconds
+
+BATCH_SIZE = 100  # Number of addresses to check at once
+
+
 
 # Token addresses
+
 TOKENS = {
-    "AR": "0x3e43cB385A6925986e7ea0f0dcdAEc06673d4e10",
-    "AISTR": "0x20ef84969f6d81Ff74AE4591c331858b20AD82CD",
-    "ALCH": "0x2b0772BEa2757624287ffc7feB92D03aeAE6F12D"
+
+    "AR": "0x3e43cB385A6925986e7ea0f0dcdAEc06673d4e10",
+
+    "AISTR": "0x20ef84969f6d81Ff74AE4591c331858b20AD82CD",
+
+    "ALCH": "0x2b0772BEa2757624287ffc7feB92D03aeAE6F12D"
+
 }
+
+
 
 # Excluded LP addresses
+
 EXCLUDED_ADDRESSES = {
-    "0x197ecb5c176aD4f6e77894913a94c5145416f148",
-    "0x3fdD9A4b3CA4a99e3dfE931e3973C2aC37B45BE9",
-    "0xF5677B22454dEe978b2Eb908d6a17923F5658a79"
+
+    "0x197ecb5c176aD4f6e77894913a94c5145416f148",
+
+    "0x3fdD9A4b3CA4a99e3dfE931e3973C2aC37B45BE9",
+
+    "0xF5677B22454dEe978b2Eb908d6a17923F5658a79"
+
 }
 
-def format_hex(value: int) -> str:
-    """Format integer as hex string with 0x prefix."""
-    return f"0x{value:x}"
 
-def get_token_holders(w3: Web3, token_address: str, verbose: bool = False) -> Set[str]:
-    """Scan Transfer events to find all addresses that interacted with the token."""
-    holders = set()
-    latest_block = w3.eth.block_number
-    start_block = max(0, latest_block - BLOCKS_TO_SCAN)
-    
-    if verbose:
-        print(f"Scanning from block {start_block} to {latest_block}")
-    
-    # Get transfer event signature
-    transfer_signature = w3.keccak(text="Transfer(address,address,uint256)")
-    transfer_topic = format_hex(int(transfer_signature.hex(), 16))
-    
-    while start_block < latest_block:
-        end_block = min(start_block + CHUNK_SIZE, latest_block)
-        
-        try:
-            logs = w3.eth.get_logs({
-                'address': Web3.to_checksum_address(token_address),
-                'fromBlock': format_hex(start_block),
-                'toBlock': format_hex(end_block),
-                'topics': [transfer_topic]
-            })
-            
-            # Process logs silently unless verbose
-            if verbose:
-                print(f"Processing {len(logs)} events from blocks {start_block}-{end_block}")
-            
-            for log in logs:
-                from_addr = Web3.to_checksum_address('0x' + log['topics'][1].hex()[-40:])
-                to_addr = Web3.to_checksum_address('0x' + log['topics'][2].hex()[-40:])
-                holders.add(from_addr)
-                holders.add(to_addr)
-                
-        except Exception as e:
-            if verbose:
-                print(f"Error in blocks {start_block}-{end_block}: {str(e)}")
-            time.sleep(RETRY_DELAY)
-            
-        start_block = end_block + 1
-    
-    # Remove zero address and excluded addresses
-    holders.discard('0x0000000000000000000000000000000000000000')
-    holders.difference_update(EXCLUDED_ADDRESSES)
-    
-    return holders
+
+def format_hex(value: int) -> str:
+
+    """Format integer as hex string with 0x prefix."""
+
+    return f"0x{value:x}"
+
+
+
+def get_token_holders(w3: Web3, token_address: str) -> Set[str]:
+
+    """Scan Transfer events to find all addresses that interacted with the token."""
+
+    start_time = time.time()
+
+    holders = set()
+
+    latest_block = w3.eth.block_number
+
+    start_block = max(0, latest_block - BLOCKS_TO_SCAN)
+
+   
+
+    print(f"Scanning blocks {start_block} to {latest_block}")
+
+   
+
+    # Get transfer event signature
+
+    transfer_signature = w3.keccak(text="Transfer(address,address,uint256)")
+
+    transfer_topic = format_hex(int(transfer_signature.hex(), 16))
+
+   
+
+    while start_block < latest_block:
+
+        end_block = min(start_block + CHUNK_SIZE, latest_block)
+
+        chunk_start_time = time.time()
+
+       
+
+        try:
+
+            logs = w3.eth.get_logs({
+
+                'address': Web3.to_checksum_address(token_address),
+
+                'fromBlock': format_hex(start_block),
+
+                'toBlock': format_hex(end_block),
+
+                'topics': [transfer_topic]
+
+            })
+
+           
+
+            print(f"Found {len(logs)} transfer events in blocks {start_block}-{end_block}")
+
+           
+
+            for log in logs:
+
+                from_addr = Web3.to_checksum_address('0x' + log['topics'][1].hex()[-40:])
+
+                to_addr = Web3.to_checksum_address('0x' + log['topics'][2].hex()[-40:])
+
+                holders.add(from_addr)
+
+                holders.add(to_addr)
+
+               
+
+        except Exception as e:
+
+            print(f"Error in blocks {start_block}-{end_block}: {str(e)}")
+
+            time.sleep(RETRY_DELAY)
+
+           
+
+        chunk_time = time.time() - chunk_start_time
+
+        print(f"Processed blocks {start_block}-{end_block} in {chunk_time:.2f}s")
+
+        start_block = end_block + 1
+
+   
+
+    # Remove zero address and excluded addresses
+
+    holders.discard('0x0000000000000000000000000000000000000000')
+
+    holders.difference_update(EXCLUDED_ADDRESSES)
+
+   
+
+    scan_time = time.time() - start_time
+
+    print(f"Token scan completed in {scan_time:.2f}s, found {len(holders)} holders")
+
+    return holders
+
+
 
 def get_balance(w3: Web3, token_address: str, holder_address: str) -> Decimal:
-    """Get token balance for an address."""
-    try:
-        # Use eth_call directly instead of contract
-        data = w3.keccak(text="balanceOf(address)")[:4].hex() + '000000000000000000000000' + holder_address[2:]
-        balance = w3.eth.call({
-            'to': Web3.to_checksum_address(token_address),
-            'data': data
-        })
-        return Decimal(int.from_bytes(balance, 'big'))
-    except Exception:
-        return Decimal(0)
+
+    """Get token balance for an address."""
+
+    balance_method_id = w3.keccak(text="balanceOf(address)")[:4].hex()
+
+    data = balance_method_id + '000000000000000000000000' + holder_address[2:]
+
+    try:
+
+        result = w3.eth.call({
+
+            'to': Web3.to_checksum_address(token_address),
+
+            'data': data
+
+        })
+
+        return Decimal(int.from_bytes(result, 'big'))
+
+    except Exception as e:
+
+        print(f"Error getting balance for {holder_address}: {str(e)}")
+
+        return Decimal(0)
+
+
+
+def check_balances(w3: Web3, holders: Set[str], token_addresses: List[str]) -> tuple[List[str], List[Decimal]]:
+
+    """Check balances for holders."""
+
+    start_time = time.time()
+
+    eligible_addresses = []
+
+    weights = []
+
+   
+
+    total_holders = len(holders)
+
+    processed = 0
+
+    last_progress = -1
+
+   
+
+    print(f"\nChecking balances for {total_holders} holders")
+
+   
+
+    for holder in holders:
+
+        total_balance = Decimal(0)
+
+        for token_address in token_addresses:
+
+            balance = get_balance(w3, token_address, holder)
+
+            total_balance += balance
+
+       
+
+        if total_balance > 0:
+
+            eligible_addresses.append(holder)
+
+            weights.append(total_balance)
+
+       
+
+        processed += 1
+
+        progress = (processed * 100) // total_holders
+
+       
+
+        if progress > last_progress:
+
+            elapsed_time = time.time() - start_time
+
+            print(f"Progress: {progress}% - Found {len(eligible_addresses)} eligible holders - "
+
+                  f"Time elapsed: {elapsed_time:.2f}s")
+
+            last_progress = progress
+
+   
+
+    total_time = time.time() - start_time
+
+    print(f"Balance check completed in {total_time:.2f}s")
+
+    return eligible_addresses, weights
+
+
 
 def weighted_random_choice(addresses: List[str], weights: List[Decimal]) -> str:
-    """Select a random address based on weights."""
-    if not addresses:
-        raise ValueError("No eligible addresses for raffle")
-    
-    total = sum(weights)
-    if total == 0:
-        raise ValueError("Total weight is zero")
-    
-    cumulative = []
-    cumsum = Decimal(0)
-    for w in weights:
-        cumsum += w
-        cumulative.append(cumsum)
-    
-    point = Decimal(random.random()) * total
-    idx = bisect.bisect_right(cumulative, point)
-    return addresses[idx]
+
+    """Select a random address based on weights."""
+
+    if not addresses:
+
+        raise ValueError("No eligible addresses for raffle")
+
+   
+
+    total = sum(weights)
+
+    if total == 0:
+
+        raise ValueError("Total weight is zero")
+
+   
+
+    cumulative = []
+
+    cumsum = Decimal(0)
+
+    for w in weights:
+
+        cumsum += w
+
+        cumulative.append(cumsum)
+
+   
+
+    point = Decimal(random.random()) * total
+
+    idx = bisect.bisect_right(cumulative, point)
+
+    return addresses[idx]
+
+
 
 def main():
-    print("Connecting to Base mainnet...")
-    w3 = Web3(Web3.HTTPProvider(RPC_URL))
-    if not w3.is_connected():
-        raise Exception("Failed to connect to Base")
-    
-    print(f"Connected successfully. Current block: {w3.eth.block_number}")
-    
-    # Collect all holders across tokens
-    all_holders = set()
-    for token_name, token_address in TOKENS.items():
-        print(f"\nScanning {token_name} holders...")
-        token_holders = get_token_holders(w3, token_address)
-        print(f"Found {len(token_holders)} {token_name} holders")
-        all_holders.update(token_holders)
-    
-    print(f"\nTotal unique addresses found: {len(all_holders)}")
-    
-    # Get balances silently
-    print("\nCalculating balances...")
-    eligible_addresses = []
-    weights = []
-    
-    for holder in all_holders:
-        total_balance = Decimal(0)
-        for token_address in TOKENS.values():
-            balance = get_balance(w3, token_address, holder)
-            total_balance += balance
-        
-        if total_balance > 0:
-            eligible_addresses.append(holder)
-            weights.append(total_balance)
-    
-    print(f"\nFound {len(eligible_addresses)} eligible addresses")
-    
-    if not eligible_addresses:
-        print("No eligible addresses found for the raffle")
-        return
-    
-    # Select winner
-    winner = weighted_random_choice(eligible_addresses, weights)
-    winner_index = eligible_addresses.index(winner)
-    winner_weight = weights[winner_index]
-    
-    print(f"\nWinner: {winner}")
-    print(f"Winner's total weight: {winner_weight}")
+
+    total_start_time = time.time()
+
+    print("Connecting to Base mainnet...")
+
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+
+    if not w3.is_connected():
+
+        raise Exception("Failed to connect to Base")
+
+   
+
+    print(f"Connected successfully. Current block: {w3.eth.block_number}")
+
+   
+
+    # Collect all holders across tokens
+
+    all_holders = set()
+
+    for token_name, token_address in TOKENS.items():
+
+        print(f"\nScanning {token_name} holders...")
+
+        token_holders = get_token_holders(w3, token_address)
+
+        print(f"Found {len(token_holders)} {token_name} holders")
+
+        all_holders.update(token_holders)
+
+   
+
+    print(f"\nTotal unique addresses found: {len(all_holders)}")
+
+   
+
+    # Get balances and find eligible addresses
+
+    print("\nCalculating balances...")
+
+    eligible_addresses, weights = check_balances(w3, all_holders, list(TOKENS.values()))
+
+   
+
+    print(f"\nFound {len(eligible_addresses)} eligible addresses")
+
+   
+
+    if not eligible_addresses:
+
+        print("No eligible addresses found for the raffle")
+
+        return
+
+   
+
+    # Select winner
+
+    winner = weighted_random_choice(eligible_addresses, weights)
+
+    winner_index = eligible_addresses.index(winner)
+
+    winner_weight = weights[winner_index]
+
+   
+
+    total_time = time.time() - total_start_time
+
+    print(f"\nWinner: {winner}")
+
+    print(f"Winner's total weight: {winner_weight}")
+
+    print(f"\nTotal execution time: {total_time:.2f} seconds")
+
+
 
 if __name__ == "__main__":
-    main()
+
+    main()
